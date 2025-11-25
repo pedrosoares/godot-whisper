@@ -1,0 +1,15 @@
+[package]
+name = "godot_whisper"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+godot = "0.4.2"
+cpal = "0.16"
+hound = "3.5"
+rubato = "0.16.2"
+whisper-rs = { version = "0.15.1", features = [ "vulkan" ] }
+opus2 = "0.3.3"
