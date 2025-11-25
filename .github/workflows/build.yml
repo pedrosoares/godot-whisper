@@ -1,0 +1,181 @@
+name: Build Rust
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest] #, macos-latest]
+        include:
+          - os: ubuntu-latest
+            bin_path: target/release/libgodot_whisper.so
+            out_name: libgodot_whisper.so
+          - os: windows-latest
+            bin_path: D:/bg/release/godot_whisper.dll
+            out_name: godot_whisper.dll
+          # - os: macos-latest
+          #   bin_path: target/release/libgodot_whisper.dylib
+          #   out_name: libgodot_whisper.dylib
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Prepare Vulkan SDK
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          curl -o vulkan-sdk-config.json https://vulkan.lunarg.com/sdk/config/latest/windows/config.json
+          export VULKAN_SDK_VERSION=$(cat vulkan-sdk-config.json | grep '"version": "' | sed -n 's/.*"version": "\([^"]*\)".*/\1/p')
+          curl -o VulkanSDK-Installer.exe https://sdk.lunarg.com/sdk/download/$VULKAN_SDK_VERSION/windows/vulkansdk-windows-X64-$VULKAN_SDK_VERSION.exe
+          export VULKAN_SDK="$(pwd)/VulkanSDK"
+
+      - name: Install Vulkan SDK
+        if: matrix.os == 'windows-latest'
+        shell: powershell
+        run: |
+          Start-Process -FilePath VulkanSDK-Installer.exe -ArgumentList 'in', "--root=$PWD\VulkanSDK", "--al", "--am", "--c" -Wait -NoNewWindow
+
+      - name: Test Vulkan SDK Install
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          VULKAN_SDK="$(pwd)/VulkanSDK"
+          echo "Vulkan SDK Version=='$VULKAN_SDK_VERSION'"
+          echo "VULKAN_SDK=='$VULKAN_SDK'"
+          ls $VULKAN_SDK/*
+
+      - name: Prepare Vulkan SDK
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          curl -o vulkan-sdk-config.json https://vulkan.lunarg.com/sdk/config/latest/windows/config.json
+          export VULKAN_SDK_VERSION=$(cat vulkan-sdk-config.json | grep '"version": "' | sed -n 's/.*"version": "\([^"]*\)".*/\1/p')
+          curl -o vulkan-sdk.tar.xz https://sdk.lunarg.com/sdk/download/$VULKAN_SDK_VERSION/linux/vulkansdk-linux-x86_64-$VULKAN_SDK_VERSION.tar.xz
+          mkdir VulkanSDK
+          tar -xf vulkan-sdk.tar.xz -C VulkanSDK
+          export VULKAN_SDK="$(pwd)/VulkanSDK/$VULKAN_SDK_VERSION/x86_64"
+          echo "VULKAN_SDK=$VULKAN_SDK" >> $GITHUB_ENV
+          echo "VULKAN_SDK_VERSION=$VULKAN_SDK_VERSION" >> $GITHUB_ENV
+          echo "PATH=$VULKAN_SDK/bin:$PATH" >> $GITHUB_ENV
+          echo "DYLD_LIBRARY_PATH=$VULKAN_SDK/lib:$DYLD_LIBRARY_PATH" >> $GITHUB_ENV
+          echo "LIBRARY_PATH=$VULKAN_SDK/lib:$LIBRARY_PATH" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$VULKAN_SDK/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+          echo "VK_ICD_FILENAMES=$VULKAN_SDK/share/vulkan/icd.d/MoltenVK_icd.json" >> $GITHUB_ENV
+          echo "VK_LAYER_PATH=$VULKAN_SDK/share/vulkan/explicit_layer.d" >> $GITHUB_ENV
+
+      # - name: Prepare Vulkan SDK
+      #   if: matrix.os == 'macos-latest'
+      #   shell: bash
+      #   run: |
+      #     curl -o vulkan-sdk-config.json https://vulkan.lunarg.com/sdk/config/latest/windows/config.json
+      #     export VULKAN_SDK_VERSION=$(cat vulkan-sdk-config.json | grep '"version": "' | sed -n 's/.*"version": "\([^"]*\)".*/\1/p')
+      #     curl -o vulkan-sdk.zip https://sdk.lunarg.com/sdk/download/$VULKAN_SDK_VERSION/mac/vulkansdk-macos-$VULKAN_SDK_VERSION.zip
+      #     mkdir VulkanSDK
+      #     unzip ./vulkan-sdk.zip
+      #     vulkansdk-macOS-$VULKAN_SDK_VERSION.app/Contents/MacOS/vulkansdk-macOS-$VULKAN_SDK_VERSION --help
+      #     sudo vulkansdk-macOS-$VULKAN_SDK_VERSION.app/Contents/MacOS/vulkansdk-macOS-$VULKAN_SDK_VERSION --root "$(pwd)/VulkanSDK" --accept-licenses --default-answer --confirm-command install
+      #     ls VulkanSDK
+      #     cat VulkanSDK/setup-env.sh
+      #     export VULKAN_SDK="$(pwd)/VulkanSDK/macOS"
+      #     echo "VULKAN_SDK=$VULKAN_SDK" >> $GITHUB_ENV
+      #     echo "VULKAN_SDK_VERSION=$VULKAN_SDK_VERSION" >> $GITHUB_ENV
+      #     echo "PATH=$VULKAN_SDK/bin:$PATH" >> $GITHUB_ENV
+      #     echo "DYLD_LIBRARY_PATH=$VULKAN_SDK/lib:$DYLD_LIBRARY_PATH" >> $GITHUB_ENV
+      #     echo "LIBRARY_PATH=$VULKAN_SDK/lib:$LIBRARY_PATH" >> $GITHUB_ENV
+      #     echo "PKG_CONFIG_PATH=$VULKAN_SDK/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+      #     echo "VK_ADD_LAYER_PATH=$VULKAN_SDK/share/vulkan/explicit_layer.d" >> $GITHUB_ENV
+      #     echo "VK_ICD_FILENAMES=$VULKAN_SDK/share/vulkan/icd.d/MoltenVK_icd.json" >> $GITHUB_ENV
+      #     echo "VK_DRIVER_FILES=$VULKAN_SDK/share/vulkan/icd.d/MoltenVK_icd.json" >> $GITHUB_ENV
+      #     echo "VK_LAYER_PATH=$VULKAN_SDK/share/vulkan/explicit_layer.d" >> $GITHUB_ENV
+
+      # -------------------
+      # Linux dependencies
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            build-essential \
+            cmake \
+            pkg-config
+
+      # -------------------
+      # Windows dependencies
+      - name: Install Windows dependencies
+        if: matrix.os == 'windows-latest'
+        run: |
+          choco install -y cmake
+
+      # -------------------
+      # macOS dependencies
+      - name: Install macOS dependencies
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew update
+          brew install cmake pkg-config glslang
+
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+
+      - name: Enable long paths
+        if: matrix.os == 'windows-latest'
+        shell: powershell
+        run: |
+          New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+
+      - name: Build Windows
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          export VULKAN_SDK="$(pwd)/VulkanSDK"
+          export PATH="$VULKAN_SDK/bin:$PATH"
+          export LD_LIBRARY_PATH="$VULKAN_SDK/lib:$LD_LIBRARY_PATH"
+          export DYLD_LIBRARY_PATH="$VULKAN_SDK/lib:$DYLD_LIBRARY_PATH"  # macOS
+          export CARGO_TARGET_DIR=D:/bg
+          cargo build --release
+          ls D:/a/godot-whisper/godot-whisper
+          echo "======"
+          ls D:/bg/release
+
+      - name: Patch Cargo.toml for macOS (use metal instead of vulkan)
+        if: matrix.os == 'macos-latest'
+        run: |
+          echo "Patching Cargo.toml for macOS..."
+          # GNU-sed compatibility for macOS
+          brew install gnu-sed || true
+
+          gsed -i 's/features = \[ *"vulkan" *\]/features = ["metal"]/g' Cargo.toml
+
+          echo "Cargo.toml patched:"
+          cat Cargo.toml
+
+      - name: Build Unix Like
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          export PATH="$VULKAN_SDK/bin:$PATH"
+          ls "$VULKAN_SDK/bin"
+          export LD_LIBRARY_PATH="$VULKAN_SDK/lib:$LD_LIBRARY_PATH"
+          export DYLD_LIBRARY_PATH="$VULKAN_SDK/lib:$DYLD_LIBRARY_PATH"  # macOS
+          cargo build --release
+          ls target/release/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.out_name }}
+          path: ${{ matrix.bin_path }}
+          if-no-files-found: error

@@ -3,8 +3,7 @@ use cpal::{Device, Host, Stream, StreamConfig, SupportedStreamConfig};
 use godot::global::godot_print;
 use opus2::{Application, Channels, Encoder};
 use rubato::{
-    FftFixedInOut, Resampler, SincFixedIn, SincFixedOut, SincInterpolationParameters,
-    SincInterpolationType, WindowFunction,
+    Resampler, SincFixedOut, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
 use std::error::Error;
 use std::sync::mpsc::Sender;
@@ -18,7 +17,7 @@ pub struct Microphone {
     host: Host,
     device: Device,
     output_device: Option<Device>,
-    config: SupportedStreamConfig,
+    config: Option<SupportedStreamConfig>,
     stream: Option<Stream>,
     output_config: Option<SupportedStreamConfig>,
     output_stream: Option<Stream>,
@@ -34,7 +33,7 @@ impl Microphone {
 
         godot_print!("Using input device: {}", device.name()?);
 
-        let config = device.default_input_config()?;
+        let config = device.default_input_config().ok();
         godot_print!("Default input config: {:?}", config);
 
         let (output_device, output_config) = if debug {
@@ -66,7 +65,7 @@ impl Microphone {
     }
 
     pub fn get_sample_rate(&self) -> u32 {
-        self.config.sample_rate().0
+        self.config.clone().unwrap().sample_rate().0
     }
 
     pub fn list_inputs(&self) -> Vec<Device> {
@@ -78,7 +77,7 @@ impl Microphone {
 
     pub fn set_input(&mut self, device: Device) {
         self.device = device;
-        self.config = self.device.default_input_config().unwrap();
+        self.config = self.device.default_input_config().ok();
     }
 
     pub fn rubato_resample(
@@ -205,7 +204,7 @@ impl Microphone {
         relay_audio: Sender<Vec<u8>>,
     ) -> Result<cpal::Stream, Box<dyn std::error::Error>> {
         GodotThreadPrint::print(format!("Building Stream"));
-        let config: StreamConfig = self.config.clone().into();
+        let config: StreamConfig = self.config.clone().unwrap().into();
         let channels = config.channels as usize;
         let sample_rate = config.sample_rate.0;
         godot_print!("sample_rate: {}", config.sample_rate.0);
@@ -386,7 +385,7 @@ impl Microphone {
         relay_audio: Sender<Vec<u8>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // Start audio capture
-        let stream = match self.config.sample_format() {
+        let stream = match self.config.clone().unwrap().sample_format() {
             cpal::SampleFormat::F32 => self.build_stream(tx, relay_audio)?,
             _ => return Err("Unsupported sample format".into()),
         };
