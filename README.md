@@ -5,9 +5,13 @@
 This project is a high-performance **Rust GDExtension** that brings real-time speech features to **Godot 4**, including:
 
 ✅ Whisper inference with **Vulkan** (Windows/Linux) or **Metal** (macOS)
+
 ✅ Real-time **keyword spotting** and streaming transcription
+
 ✅ Native **microphone capture** with a dedicated Rust audio thread
+
 ✅ Full **Opus codec** support (encode + decode)
+
 ✅ Godot nodes exposed via `whisper_node.rs`, `opus_decoder_node.rs`
 
 The entire extension is optimized for **low-latency**, **real-time** voice interactions for gameplay, voice commands, NPC interactions, and networked voice chat.
