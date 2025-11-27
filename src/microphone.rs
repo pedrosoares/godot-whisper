@@ -11,7 +11,7 @@ use std::sync::mpsc::Sender;
 use crate::codec::encode_stereo_to_opus;
 use crate::godot_thread_print::GodotThreadPrint;
 
-const OPUS_FRAME_SIZE: usize = 480; // 20ms @ 48kHz
+const OPUS_FRAME_SIZE: usize = 480; // 10ms @ 48kHz
 
 pub struct Microphone {
     host: Host,
@@ -268,33 +268,6 @@ impl Microphone {
                     }
                 }
 
-                // let sampled =
-                //     match Self::rubato_resample(data.to_vec(), sample_rate as f32, 48000.0) {
-                //         Ok(a) => a,
-                //         Err(err) => {
-                //             let error = format!("{:?}", err);
-                //             GodotThreadPrint::print(error);
-                //             panic!("error on opus");
-                //         }
-                //     };
-
-                fn normalize_f32_inplace(samples: &mut [f32]) {
-                    let mut max = 0.0f32;
-                    for &s in samples.iter() {
-                        if s.abs() > max {
-                            max = s.abs();
-                        }
-                    }
-                    if max > 1.0 {
-                        for v in samples.iter_mut() {
-                            *v /= max;
-                        }
-                    }
-                }
-
-                // let mut cpal_buffer = data.to_vec().clone();
-                // normalize_f32_inplace(&mut cpal_buffer);
-
                 let sampled = Self::resample_linear_stereo(&data[..], sample_rate as u32, 48000);
 
                 local_buffer.extend(sampled);
@@ -334,23 +307,6 @@ impl Microphone {
                     relay_audio.send(opus_encoded).unwrap();
                 }
 
-                // if frame_size > 0 {
-                //     let opus_encoded = match encode_stereo_to_opus(
-                //         &local_buffer[..],
-                //         48000,
-                //         frame_size as usize,
-                //     ) {
-                //         Ok(a) => a,
-                //         Err(err) => {
-                //             let error = format!("{:?}", err);
-                //             GodotThreadPrint::print(error);
-                //             panic!("error on opus");
-                //         }
-                //     };
-
-                //     relay_audio.send(opus_encoded).unwrap();
-                // }
-
                 let inv_channels = 1.0 / channels as f32;
 
                 let mono_samples: Vec<f32> = data
@@ -364,8 +320,6 @@ impl Microphone {
                 } else {
                     mono_samples
                 };
-
-                // GodotThreadPrint::print(format!("1: Sending: {}", resampled.len()));
 
                 match tx.send(resampled) {
                     Err(err) => GodotThreadPrint::print(format!("1: Stream error: {}", err)),

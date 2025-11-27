@@ -124,7 +124,7 @@ impl Whisper {
     }
 
     #[func]
-    fn decode_audio(&mut self, encoded: Vec<u8>, sample_rate: i32) -> Vec<f32> {
+    fn decode_audio(&mut self, encoded: Vec<u8>, _sample_rate: i32) -> Vec<f32> {
         // let frame_size = sample_rate * 10 / 1000;
         decode_opus_to_stereo(&mut self.decoder, &encoded[..], 48000 as u32, 480 as usize).unwrap()
     }
