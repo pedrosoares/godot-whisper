@@ -15,7 +15,7 @@ const OPUS_FRAME_SIZE: usize = 480; // 10ms @ 48kHz
 
 pub struct Microphone {
     host: Host,
-    device: Device,
+    device: Option<Device>,
     output_device: Option<Device>,
     config: Option<SupportedStreamConfig>,
     stream: Option<Stream>,
@@ -27,13 +27,15 @@ pub struct Microphone {
 impl Microphone {
     pub fn new(debug: bool) -> Result<Self, Box<dyn std::error::Error>> {
         let host = cpal::default_host();
-        let device = host
-            .default_input_device()
-            .ok_or("No input device available")?;
+        let device = host.default_input_device();
 
-        godot_print!("Using input device: {}", device.name()?);
+        let config = if let Some(device) = &device {
+            godot_print!("Using input device: {}", device.name()?);
+            device.default_input_config().ok()
+        } else {
+            None
+        };
 
-        let config = device.default_input_config().ok();
         godot_print!("Default input config: {:?}", config);
 
         let (output_device, output_config) = if debug {
@@ -61,7 +63,7 @@ impl Microphone {
     }
 
     pub fn get_current_input(&self) -> Device {
-        self.device.clone()
+        self.device.clone().unwrap()
     }
 
     pub fn get_sample_rate(&self) -> u32 {
@@ -76,8 +78,8 @@ impl Microphone {
     }
 
     pub fn set_input(&mut self, device: Device) {
-        self.device = device;
-        self.config = self.device.default_input_config().ok();
+        self.device = Some(device);
+        self.config = self.device.clone().unwrap().default_input_config().ok();
     }
 
     pub fn rubato_resample(
@@ -258,79 +260,83 @@ impl Microphone {
         let debug = self.debug.clone();
         let mut local_buffer: Vec<f32> = Vec::new();
         let mut encoder = Encoder::new(48000, Channels::Stereo, Application::Voip).unwrap();
-        let stream = self.device.build_input_stream(
-            &config,
-            move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                if debug {
-                    match dtx.send(data.to_vec()) {
-                        Err(err) => GodotThreadPrint::print(format!("Stream error: {}", err)),
-                        _ => {}
-                    }
-                }
-
-                let sampled = Self::resample_linear_stereo(&data[..], sample_rate as u32, 48000);
-
-                local_buffer.extend(sampled);
-
-                let samples_per_frame = OPUS_FRAME_SIZE * channels;
-
-                // Processar todos os frames completos disponíveis
-                while local_buffer.len() >= samples_per_frame {
-                    let frame: Vec<f32> = local_buffer.drain(..samples_per_frame).collect();
-
-                    let duration_seconds =
-                        (frame.len() as f32 / (48000 as f32 * channels as f32)) * 1000.0;
-
-                    let frame_size = 48000 * duration_seconds as i32 / 1000;
-
-                    GodotThreadPrint::print(format!(
-                        "frame_size: {}, duration: {}, sampled: {}",
-                        frame_size,
-                        duration_seconds,
-                        frame.len()
-                    ));
-
-                    let opus_encoded = match encode_stereo_to_opus(
-                        &mut encoder,
-                        &frame[..],
-                        48000,
-                        OPUS_FRAME_SIZE,
-                    ) {
-                        Ok(a) => a,
-                        Err(err) => {
-                            let error = format!("{:?}", err);
-                            GodotThreadPrint::print(error);
-                            panic!("error on opus");
+        if let Some(device) = &mut self.device {
+            let stream = device.build_input_stream(
+                &config,
+                move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                    if debug {
+                        match dtx.send(data.to_vec()) {
+                            Err(err) => GodotThreadPrint::print(format!("Stream error: {}", err)),
+                            _ => {}
                         }
+                    }
+
+                    let sampled =
+                        Self::resample_linear_stereo(&data[..], sample_rate as u32, 48000);
+
+                    local_buffer.extend(sampled);
+
+                    let samples_per_frame = OPUS_FRAME_SIZE * channels;
+
+                    // Processar todos os frames completos disponíveis
+                    while local_buffer.len() >= samples_per_frame {
+                        let frame: Vec<f32> = local_buffer.drain(..samples_per_frame).collect();
+
+                        let duration_seconds =
+                            (frame.len() as f32 / (48000 as f32 * channels as f32)) * 1000.0;
+
+                        let frame_size = 48000 * duration_seconds as i32 / 1000;
+
+                        GodotThreadPrint::print(format!(
+                            "frame_size: {}, duration: {}, sampled: {}",
+                            frame_size,
+                            duration_seconds,
+                            frame.len()
+                        ));
+
+                        let opus_encoded = match encode_stereo_to_opus(
+                            &mut encoder,
+                            &frame[..],
+                            48000,
+                            OPUS_FRAME_SIZE,
+                        ) {
+                            Ok(a) => a,
+                            Err(err) => {
+                                let error = format!("{:?}", err);
+                                GodotThreadPrint::print(error);
+                                panic!("error on opus");
+                            }
+                        };
+
+                        relay_audio.send(opus_encoded).unwrap();
+                    }
+
+                    let inv_channels = 1.0 / channels as f32;
+
+                    let mono_samples: Vec<f32> = data
+                        .chunks(channels)
+                        .map(|frame| frame.iter().copied().sum::<f32>() * inv_channels)
+                        .collect();
+
+                    // Resample if needed
+                    let resampled = if sample_rate != target_sample_rate {
+                        Self::resample_linear(&mono_samples, sample_rate, target_sample_rate)
+                    } else {
+                        mono_samples
                     };
 
-                    relay_audio.send(opus_encoded).unwrap();
-                }
+                    match tx.send(resampled) {
+                        Err(err) => GodotThreadPrint::print(format!("1: Stream error: {}", err)),
+                        _ => {}
+                    }
+                },
+                |err| GodotThreadPrint::print(format!("2: Stream error: {}", err)),
+                None,
+            )?;
+            return Ok(stream);
+        }
 
-                let inv_channels = 1.0 / channels as f32;
-
-                let mono_samples: Vec<f32> = data
-                    .chunks(channels)
-                    .map(|frame| frame.iter().copied().sum::<f32>() * inv_channels)
-                    .collect();
-
-                // Resample if needed
-                let resampled = if sample_rate != target_sample_rate {
-                    Self::resample_linear(&mono_samples, sample_rate, target_sample_rate)
-                } else {
-                    mono_samples
-                };
-
-                match tx.send(resampled) {
-                    Err(err) => GodotThreadPrint::print(format!("1: Stream error: {}", err)),
-                    _ => {}
-                }
-            },
-            |err| GodotThreadPrint::print(format!("2: Stream error: {}", err)),
-            None,
-        )?;
-
-        Ok(stream)
+        return Err("No input device".into());
     }
 
     pub fn start(
